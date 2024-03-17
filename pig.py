@@ -1,6 +1,6 @@
 import random
 import argparse
-import inspect
+import time
 
 
 random.seed(0)
@@ -9,30 +9,77 @@ random.seed(0)
 class Player:
     score = 0
     wins = 0
-    players = []
 
     def __init__(self, name):
         self.name = f"Player {name}"
 
-    @classmethod
-    def create_players(cls, num_players):
-        for num in range(1, (num_players + 1)):
+    def player_input(self, is_initial) -> str:
+        if is_initial:
+            return input(f"{self.name}'s turn. {self.name}'s score is {self.score}. Type 'r' to roll.\n")
+        else:
+            return input(f"{self.name}'s turn. {self.name}'s score is {self.score}. Type 'r' to roll or 'h' to hold.\n")
+
+
+class ComputerPlayer(Player):
+    def __init__(self, num):
+        super().__init__(f"{num} (Computer)")
+
+    def strategy(self, current_turn_total, winning_score) -> bool:
+        if ((1/4) * winning_score) <= (winning_score - self.score):
+            if current_turn_total >= ((1/4) * winning_score):
+                time.sleep(.3)
+                print(f"{self.name} holds")
+                return False
+            else:
+                time.sleep(.3)
+                return True
+        elif (winning_score - self.score) <= ((1/4) * winning_score):
+            if current_turn_total >= (winning_score - self.score):
+                print(f"{self.name} holds")
+                time.sleep(.3)
+                return False
+            else:
+                time.sleep(.3)
+                return True
+        else:
+            time.sleep(.3)
+            return True
+
+
+class PlayerFactory:
+
+    def __init__(self, humans, computers):
+        self.humans = humans
+        self.computers = computers
+        self.players = []
+
+    def create_players(self) -> list:
+        comp_player_num = 0
+        for num in range(1, (self.humans + 1)):
+            comp_player_num += 1
             player = Player(num)
-            cls.players.append(player)
-        return cls.players
+            self.players.append(player)
+        for num in range(1, (self.computers + 1)):
+            comp_player_num += 1
+            player = ComputerPlayer(comp_player_num)
+            self.players.append(player)
+        return self.players
 
 
 class Die:
     dice = []
 
-    def __init__(self, name, sides):
-        self.name = name
+    def __init__(self, sides):
         self.sides = int(sides)
         Die.dice.append(self)
 
-    def roll(self):
+    def roll(self) -> int:
         roll = random.randint(1, self.sides)
         return roll
+
+
+def sort_winner(player_list) -> None:
+    player_list.sort(key=lambda player: player.score, reverse=True)
 
 
 class Game:
@@ -40,17 +87,24 @@ class Game:
     # the is_initial_phase variable is a flag to determine which phase of the player turn it is
     is_initial_phase = False
     current_turn_total = 0
+    winning_score = 100
 
-    def __init__(self, players, name="Game", sides=6, winning_score=100):
-        self.name = name
-        self.die = Die(f"{self.name} die", sides)
-        self.players = players
-        self.winning_score = winning_score
+    def __init__(self):
+        self.die = Die(6)
+        self.players = []
 
-    def parse_input(self, player):
+    @classmethod
+    def set_winning_score(cls, score) -> None:
+        cls.winning_score = score
+
+    def initialize_game(self, humans, computers) -> None:
+        pf = PlayerFactory(humans, computers)
+        self.players = pf.create_players()
+
+    def parse_input(self, player) -> bool:
         while True:
             if self.is_initial_phase:
-                choice = input(f"{player.name}'s turn. {player.name}'s score is {player.score}. Type 'r' to roll.\n")
+                choice = player.player_input(self.is_initial_phase)
                 if choice != 'r':
                     print(f"Invalid input.")
                     continue
@@ -58,8 +112,7 @@ class Game:
                     self.is_initial_phase = False
                     return True
             else:
-                choice = input(f"{player.name}'s turn. {player.name}'s score is {player.score}. "
-                               f"Type 'r' to roll or 'h' to hold.\n")
+                choice = player.player_input(self.is_initial_phase)
                 if choice == 'h':
                     print(f"{player.name} holds. {player.name}'s score is {player.score}.")
                     return False
@@ -69,21 +122,28 @@ class Game:
                     print(f"Invalid input.")
                     continue
 
-    def turn(self, player):
+    def turn(self, player) -> None:
         self.current_turn_total = 0
         self.is_initial_phase = True
         is_continue = True
-        is_valid = self.parse_input(player)
+        if isinstance(player, ComputerPlayer):
+            is_valid = player.strategy(self.current_turn_total, self.winning_score)
+        else:
+            is_valid = self.parse_input(player)
         while is_continue:
+            self.is_timed(player)
             if is_valid:
                 self.is_initial_phase = False
                 is_good_roll = self.scoring(player)
                 if is_good_roll:
-                    is_continue = self.parse_input(player)
+                    if isinstance(player, ComputerPlayer):
+                        is_continue = player.strategy(self.current_turn_total, self.winning_score)
+                    else:
+                        is_continue = self.parse_input(player)
                 else:
                     is_continue = False
 
-    def scoring(self, player):
+    def scoring(self, player) -> bool:
         roll = self.die.roll()
         if roll == 1:
             self.rolled_one(player)
@@ -100,15 +160,16 @@ class Game:
                       f"{self.current_turn_total}")
             return True
 
-    def add_score(self, player, roll):
+    def add_score(self, player, roll) -> None:
         self.current_turn_total += roll
         player.score += roll
 
-    def rolled_one(self, player):
+    def rolled_one(self, player) -> None:
         player.score -= self.current_turn_total
         self.current_turn_total = 0
 
-    def play_game(self):
+    def play_game(self, humans, computers) -> None:
+        self.initialize_game(humans, computers)
         for player in self.players:
             player.score = 0
         no_winner = True
@@ -123,53 +184,65 @@ class Game:
                 if not no_winner:
                     break
 
+    def is_timed(self, player) -> None:
+        if isinstance(self, TimedGameProxy):
+            times_up = self.check_time(time.time())
+            if times_up:
+                self.players.sort(key=lambda plyr: player.score, reverse=True)
+                sort_winner(self.players)
+                print(f"Time's up! The winner is {self.players[0].name} with a score of {self.players[0].score}.")
+                quit()
+
+
+class TimedGameProxy(Game):
+    def __init__(self, timed):
+        super().__init__()
+        self.start_time = time.time()
+        self.timed = timed
+        self.timer = 60
+
+    def check_time(self, current_time) -> bool:
+        if self.timed:
+            if current_time - self.start_time >= self.timer:
+                return True
+            else:
+                return False
+
 
 def main():
     parser = argparse.ArgumentParser(description="Program to play the game of Pig.")
-    parser.add_argument("-n", "--name",
-                        help="This is the name of an individual game.",
-                        type=str,
-                        default=inspect.signature(Game.__init__).parameters['name'].default)
     parser.add_argument("-p", "--numPlayers",
-                        help="How many players you would like to play with, in integer format. The default is 2, the "
-                             "minimum is 1, and the maximum is 10. You must enter a value within that range.",
+                        help="How many human players you would like to play with, in integer format. The default is 1, "
+                             "the minimum is 1, and the maximum is 10. You must enter a value within that range.",
                         type=int, choices=range(1, 11),
-                        default=2)
-    parser.add_argument("-d", "--numSides",
-                        help="Amount of sides each game die has, in integer format. The default is 6, the "
-                             "minimum is 4, and the maximum is 20. You must enter a value within that range.",
-                        type=int, choices=range(4, 21),
-                        default=inspect.signature(Game.__init__).parameters['sides'].default)
-    parser.add_argument("-g", "--numGames",
-                        help="Amount of games being created, in integer format. The default is 1, the "
-                             "minimum is 1, and the maximum is 4. You must enter a value within that range."
-                             "Each game will be played sequentially, when one game ends the next game begins until "
-                             "all games have been completed.",
-                        type=int, choices=range(1, 5),
                         default=1)
-    parser.add_argument("-s", "--score",
-                        help="Amount of points needed to win the game. Default is 100, minimum is 20 and maximum is "
-                             "1000.",
-                        type=int, choices=range(20, 1001),
-                        default=inspect.signature(Game.__init__).parameters['winning_score'].default)
+    parser.add_argument("-c", "--numComputers",
+                        help="How many computer players you would like to play with, in integer format. The default is "
+                             "1, the minimum is 0, and the maximum is 10. You must enter a value within that range.",
+                        type=int, choices=range(0, 11),
+                        default=1)
+    parser.add_argument("-t", "--timed",
+                        help="Whether or not you want to play a timed game. Timed games end after 1 minute, "
+                             "highest score wins.",
+                        action="store_true")
     args = parser.parse_args()
 
-    if args.numGames == 1:
-        text = f"is {args.numGames} game"
+    total_players = args.numPlayers + args.numComputers
+
+    if total_players == 1:
+        player_text = f"There is currently only {total_players} player."
     else:
-        text = f"are {args.numGames} games"
+        player_text = f"There are currently {total_players} players."
 
     print(f"Welcome to Pig! The rules are simple: each player repeatedly rolls a die until they roll a one or they "
           f"decide to hold. If they roll a one they score nothing and must pass the die to the next player.\nIf they "
           f"roll any other number they add it to their score and can decide to roll again or hold and pass the die to "
           f"the next player. Remember, if you roll a one at any point, your score reverts to what it was when the turn "
-          f"started. There are currently {args.numPlayers} players, playing with a {args.numSides}-sided die, and "
-          f"there {text}. The points needed to win is {args.score}. Player 1 rolls first.\nGood luck!\n")
+          f"started. {player_text} The points needed to win is {Game.winning_score}. Player 1 rolls first."
+          f"\nGood luck!\n")
 
-    players = Player.create_players(args.numPlayers)
-    for num in range(1, args.numGames + 1):
-        game = Game(players, f"{args.name} {num}", args.numSides, args.score)
-        game.play_game()
+    game = TimedGameProxy(args.timed)
+    game.play_game(args.numPlayers, args.numComputers)
 
 
 if __name__ == '__main__':
